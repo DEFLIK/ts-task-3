@@ -1,25 +1,93 @@
-/**
- * Задание 4 - Гарантия доставки
- * Денюжки со счета на счет перевести легко, а вот дотащить 3 килограмма палладия, может быть затруднительно
- * Изучите интервейс IContract
- * Опищите и реализуйте функционал сущности Договора-контракта
- * BankingContract - банковский перевод, без задержки
- * SmartContract - перевод через блокчейн, задержка 3000мс
- * LogisticContract - перевозка металла, задержка 6000мс
- */
 import { Currency } from "../task_1";
 import { ISecureVaultRequisites } from "../task_3";
 
-export class SmartContract implements IContract{
+export class Contract implements IContract {
+    public readonly id: number;
+    public readonly value: Currency;
+    public readonly sender: ISecureVaultRequisites;
+    public readonly receiver: ISecureVaultRequisites;
+    public promise: Promise<ContractState>; // наверное, стоило сделать приватным и вынести только метод finally наружу, но я устал и хочу спать(
+    private _delay: number;
+    private _state: ContractState;
+    private resolve: (param: ContractState) => void;
 
+    public get state () {
+        return this._state;
+    }
+
+    constructor(delay: number, sender: ISecureVaultRequisites, receiver: ISecureVaultRequisites, currency: Currency) {
+        if (sender.id === receiver.id) {
+            throw new Error('Cant create contract between one person')
+        }
+
+        this._delay = delay;
+        this.sender = sender;
+        this.receiver = receiver;
+        this.value = currency;
+        this._state = ContractState.pending;
+        this.id = this.getHashCode(31239);
+    }
+
+    public signAndTransfer(): void {
+        this._state = ContractState.transfer;
+        this.promise = new Promise<ContractState>(resolve => {
+            this.resolve = resolve;
+
+            setTimeout(() => {
+                resolve(ContractState.close);
+            }, this._delay);
+        }).then(result => this._state = result);
+    }
+
+    public closeTransfer(): void {
+        this.applyResolving(ContractState.close);
+    }
+
+    public rejectTransfer(): void {
+        this.applyResolving(ContractState.rejected);
+    }
+
+    private applyResolving(result: ContractState) {
+        if (this.promise === undefined) {
+            throw new Error('Сontract hasn\'t been signed yet');
+        }
+        if (this._state === ContractState.transfer) { // Компенсирую задержку промиса в callback очереди
+            this._state = result; 
+        }
+        this.resolve(result);
+    }
+
+    private getHashCode(startHash: number): number {
+        const fnvPrime = 25348;
+        const value = this.sender.id.toString() 
+            + this.receiver.id.toString() 
+            + new Date().getTime().toString();
+
+        for (const char of value) {
+            startHash = (startHash * fnvPrime) ^ char.charCodeAt(0);
+        }
+
+        return startHash;
+    }
 }
 
-export class BankingContract implements IContract{
 
+export class SmartContract extends Contract {
+    constructor(sender: ISecureVaultRequisites, receiver: ISecureVaultRequisites, currency: Currency) {
+        super(3000, sender, receiver, currency);
+    }
 }
 
-export class LogisticContract implements IContract{
+export class BankingContract extends Contract {
+    constructor(sender: ISecureVaultRequisites, receiver: ISecureVaultRequisites, currency: Currency) {
+        super(0, sender, receiver, currency);
+    }
+}
 
+export class LogisticContract extends Contract {
+    constructor(sender: ISecureVaultRequisites, receiver: ISecureVaultRequisites, currency: Currency) {
+        super(6000, sender, receiver, currency);
+    }
 }
 
 
@@ -44,6 +112,10 @@ export interface IContract{
      * Реквизиты получателя
      */
     receiver: ISecureVaultRequisites,
+    /**
+     * Promise выполнения (добавлено лично)
+     */
+    promise: Promise<ContractState>,
     /**
      * Начало исполнения контракта
      */
@@ -76,3 +148,5 @@ export enum ContractState{
      */
     rejected
 }
+
+
